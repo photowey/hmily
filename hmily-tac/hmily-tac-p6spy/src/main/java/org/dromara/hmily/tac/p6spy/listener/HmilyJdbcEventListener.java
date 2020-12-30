@@ -21,17 +21,25 @@ import com.p6spy.engine.common.CallableStatementInformation;
 import com.p6spy.engine.common.ConnectionInformation;
 import com.p6spy.engine.common.PreparedStatementInformation;
 import com.p6spy.engine.common.StatementInformation;
-import com.p6spy.engine.event.JdbcEventListener;
-import java.sql.SQLException;
-import java.util.Objects;
+import com.p6spy.engine.common.Value;
+import com.p6spy.engine.event.SimpleJdbcEventListener;
+import lombok.SneakyThrows;
 import org.dromara.hmily.tac.p6spy.executor.HmilyExecuteTemplate;
+
+import java.lang.reflect.Method;
+import java.sql.SQLException;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * The type Hmily jdbc event listener.
  *
  * @author xiaoyu
+ * @author zhaojun
  */
-public class HmilyJdbcEventListener extends JdbcEventListener {
+public class HmilyJdbcEventListener extends SimpleJdbcEventListener {
     
     @Override
     public void onAfterGetConnection(final ConnectionInformation connectionInformation, final SQLException e) {
@@ -42,27 +50,9 @@ public class HmilyJdbcEventListener extends JdbcEventListener {
     }
     
     @Override
-    public void onBeforeExecute(final PreparedStatementInformation statementInformation) {
-        super.onBeforeExecute(statementInformation);
-        HmilyExecuteTemplate.INSTANCE.execute(statementInformation);
-    }
-    
-    @Override
-    public void onBeforeExecute(final StatementInformation statementInformation, final String sql) {
-        super.onBeforeExecute(statementInformation, sql);
-        HmilyExecuteTemplate.INSTANCE.execute(statementInformation);
-    }
-    
-    @Override
-    public void onBeforeExecuteUpdate(final PreparedStatementInformation statementInformation) {
-        super.onBeforeExecuteUpdate(statementInformation);
-        HmilyExecuteTemplate.INSTANCE.execute(statementInformation);
-    }
-    
-    @Override
-    public void onBeforeExecuteUpdate(final StatementInformation statementInformation, final String sql) {
-        super.onBeforeExecuteUpdate(statementInformation, sql);
-        HmilyExecuteTemplate.INSTANCE.execute(statementInformation);
+    public void onBeforeAnyExecute(final StatementInformation statementInformation) {
+        super.onBeforeAnyExecute(statementInformation);
+        HmilyExecuteTemplate.INSTANCE.execute(statementInformation.getSql(), getParameters(statementInformation), statementInformation.getConnectionInformation());
     }
     
     @Override
@@ -71,14 +61,14 @@ public class HmilyJdbcEventListener extends JdbcEventListener {
         if (Objects.isNull(e)) {
             HmilyExecuteTemplate.INSTANCE.commit(connectionInformation.getConnection());
         } else {
-            HmilyExecuteTemplate.INSTANCE.clean(connectionInformation.getConnection());
+            HmilyExecuteTemplate.INSTANCE.rollback(connectionInformation.getConnection());
         }
     }
     
     @Override
     public void onAfterRollback(final ConnectionInformation connectionInformation, final long timeElapsedNanos, final SQLException e) {
         super.onAfterRollback(connectionInformation, timeElapsedNanos, e);
-        HmilyExecuteTemplate.INSTANCE.clean(connectionInformation.getConnection());
+        HmilyExecuteTemplate.INSTANCE.rollback(connectionInformation.getConnection());
     }
     
     @Override
@@ -94,6 +84,22 @@ public class HmilyJdbcEventListener extends JdbcEventListener {
     @Override
     public void onAfterPreparedStatementSet(final PreparedStatementInformation statementInformation, final int parameterIndex, final Object value, final SQLException e) {
         statementInformation.setParameterValue(parameterIndex, value);
+    }
+    
+    @SneakyThrows
+    @SuppressWarnings("unchecked")
+    private List<Object> getParameters(final StatementInformation statementInformation) {
+        List<Object> result = new LinkedList<>();
+        if (!(statementInformation instanceof PreparedStatementInformation)) {
+            return result;
+        }
+        Method method = statementInformation.getClass().getDeclaredMethod("getParameterValues");
+        method.setAccessible(true);
+        Map<Integer, Value> parameterValues = (Map<Integer, Value>) method.invoke(statementInformation);
+        for (int i = 0; i < parameterValues.size(); i++) {
+            result.add(parameterValues.get(i).getValue());
+        }
+        return result;
     }
 }
 
